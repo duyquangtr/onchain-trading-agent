@@ -1,0 +1,21 @@
+# gitleaks configuration for onchain-trading-agent.
+#
+# We build on gitleaks' built-in rule set (private keys, API tokens, etc.) and
+# only add an allowlist for files that are safe by design, so the scan stays
+# noise-free while still catching real secrets.
+#
+# Run it locally from Git Bash with:
+#   gitleaks detect --no-banner
+
+[extend]
+# Start from gitleaks' default rules instead of redefining them.
+useDefault = true
+
+[allowlist]
+description = "Paths that are safe by design"
+paths = [
+  # Vendored dependencies (pinned git submodules) are not our code.
+  '''contracts/lib/''',
+  # The example env file only ever contains placeholder names, never values.
+  '''\.env\.example$''',
+]
