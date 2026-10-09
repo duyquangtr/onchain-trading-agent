@@ -1,0 +1,23 @@
+# gitleaks configuration for onchain-trading-agent.
+#
+# We build on gitleaks' built-in rule set (private keys, API tokens, etc.) and
+# only add an allowlist for files that are safe by design, so the scan stays
+# noise-free while still catching real secrets.
+#
+# Run it locally from Git Bash with:
+#   gitleaks detect --no-banner
+
+[extend]
+# Start from gitleaks' default rules instead of redefining them.
+useDefault = true
+
+[allowlist]
+description = "Paths that are safe by design"
+paths = [
+  # Vendored dependencies (pinned git submodules) are not our code.
+  '''contracts/lib/''',
+]
+# Note: `.env.example` is intentionally NOT allowlisted. It is the file people
+# are most likely to paste a real key into by accident, so we want gitleaks to
+# scan it. It only holds empty placeholders today, so it causes no false
+# positives.

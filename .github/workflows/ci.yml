@@ -1,0 +1,63 @@
+# Continuous integration for onchain-trading-agent (starts in M1a).
+#
+# What runs on every pull request:
+#   1. contracts  -> `forge build` + `forge test` for the AgentVault contracts.
+#   2. secret-scan -> gitleaks, so no private key or API key ever lands in git.
+#
+# More milestones (pytest, lint, the web build) are added to this file in M3.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel older runs of the same branch so we don't waste minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the workflow's GITHUB_TOKEN can only read. `pull-requests:
+# read` is what gitleaks-action needs to look at PRs.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  contracts:
+    name: forge test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # All Foundry commands live in the contracts/ project.
+        working-directory: contracts
+    steps:
+      - name: Check out the code (with submodules for forge-std and OpenZeppelin)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry (pinned so CI matches local)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: 1.8.5
+
+      - name: Build
+        run: forge build
+
+      - name: Test
+        run: forge test -vvv
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the full history so gitleaks can scan every commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
