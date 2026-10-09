@@ -17,6 +17,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: the workflow's GITHUB_TOKEN can only read. `pull-requests:
+# read` is what gitleaks-action needs to look at PRs.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   contracts:
     name: forge test

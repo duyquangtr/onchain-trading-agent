@@ -16,6 +16,8 @@ description = "Paths that are safe by design"
 paths = [
   # Vendored dependencies (pinned git submodules) are not our code.
   '''contracts/lib/''',
-  # The example env file only ever contains placeholder names, never values.
-  '''\.env\.example$''',
 ]
+# Note: `.env.example` is intentionally NOT allowlisted. It is the file people
+# are most likely to paste a real key into by accident, so we want gitleaks to
+# scan it. It only holds empty placeholders today, so it causes no false
+# positives.
