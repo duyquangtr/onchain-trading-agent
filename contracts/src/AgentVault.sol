@@ -98,6 +98,9 @@ contract AgentVault is Ownable2Step, Pausable, ReentrancyGuard {
     /// @notice Thrown when a recipient/token address that must be set is zero.
     error ZeroAddress();
 
+    /// @notice Thrown when someone tries to renounce ownership (disabled here).
+    error RenounceDisabled();
+
     // --------------------------------------------------------------------- //
     //                              Constructor                              //
     // --------------------------------------------------------------------- //
@@ -130,10 +133,16 @@ contract AgentVault is Ownable2Step, Pausable, ReentrancyGuard {
     /// @dev The owner must `approve` this vault on the token first. Works while
     ///      paused so the owner can always top up. `nonReentrant` is belt-and-
     ///      braces around the external token call.
+    ///      We emit the amount the vault *actually received* (balance after
+    ///      minus before), not the requested `amount`. For our own mUSDC/mWETH
+    ///      these are equal, but a fee-on-transfer token would deliver less, and
+    ///      the event should never overstate the balance.
     function deposit(address token, uint256 amount) external nonReentrant onlyOwner {
         if (amount == 0) revert ZeroAmount();
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        emit Deposited(token, msg.sender, amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        emit Deposited(token, msg.sender, received);
     }
 
     /// @notice Send `amount` of `token` from the vault to `to`.
@@ -191,6 +200,21 @@ contract AgentVault is Ownable2Step, Pausable, ReentrancyGuard {
     ///      compromised agent key cannot undo the owner's (or its own) pause.
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    // --------------------------------------------------------------------- //
+    //                           Ownership safety                            //
+    // --------------------------------------------------------------------- //
+
+    /// @notice Renouncing ownership is disabled on purpose.
+    /// @dev `Ownable.renounceOwnership` would set `owner` to `address(0)`
+    ///      forever. With no owner, nobody could ever `withdraw` or `unpause`
+    ///      again, so the funds would be stuck and the vault stuck paused. That
+    ///      breaks the core promise that the owner can always pull funds out, so
+    ///      we override it to always revert. Hand the vault over with the
+    ///      two-step `transferOwnership` / `acceptOwnership` instead.
+    function renounceOwnership() public pure override {
+        revert RenounceDisabled();
     }
 
     // --------------------------------------------------------------------- //
