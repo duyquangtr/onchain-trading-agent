@@ -1,0 +1,27 @@
+# Foundry configuration for the AgentVault contracts.
+# Docs: https://getfoundry.sh/config/reference/
+
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+
+# Pin the Solidity compiler so builds are reproducible for everyone and in CI.
+solc_version = "0.8.28"
+
+# Treat every warning as an error so sloppy code can't sneak into main.
+deny = "warnings"
+
+# Optimize the deployed bytecode; 200 runs is the common default.
+optimizer = true
+optimizer_runs = 200
+
+# Report gas and keep the test output readable.
+gas_reports = ["AgentVault"]
+
+# Short import paths (see remappings.txt for the same list used by editors).
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
