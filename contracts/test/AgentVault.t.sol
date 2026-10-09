@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {AgentVault} from "../src/AgentVault.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {FeeOnTransferERC20} from "./mocks/FeeOnTransferERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -98,6 +99,24 @@ contract AgentVaultTest is Test {
         vm.prank(owner);
         vm.expectRevert(AgentVault.ZeroAmount.selector);
         vault.deposit(address(usdc), 0);
+    }
+
+    /// @dev With a fee-on-transfer token the vault receives less than requested,
+    ///      and `Deposited` must log what actually arrived, never the ask.
+    function test_deposit_logsAmountActuallyReceived() public {
+        FeeOnTransferERC20 feeToken = new FeeOnTransferERC20(10e6);
+        feeToken.mint(owner, 1_000e6);
+        vm.prank(owner);
+        feeToken.approve(address(vault), type(uint256).max);
+
+        // Asking for 100 but a 10-unit fee means only 90 land in the vault.
+        vm.expectEmit(true, true, false, true);
+        emit Deposited(address(feeToken), owner, 90e6);
+
+        vm.prank(owner);
+        vault.deposit(address(feeToken), 100e6);
+
+        assertEq(feeToken.balanceOf(address(vault)), 90e6, "vault should hold the net amount");
     }
 
     // ------------------------------------------------------------------ //
@@ -255,6 +274,34 @@ contract AgentVaultTest is Test {
         assertEq(vault.agent(), address(0), "address(0) should disable the agent");
     }
 
+    /// @dev The SPEC §4 recovery path: if the agent key leaks, the owner sets a
+    ///      new agent and the old key can no longer trip the pause.
+    function test_setAgent_oldAgentLosesPauseRightsAfterRotation() public {
+        address newAgent = makeAddr("newAgent");
+        vm.prank(owner);
+        vault.setAgent(newAgent);
+
+        // The old (leaked) key is now powerless.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(AgentVault.NotOwnerOrAgent.selector, agent));
+        vault.pause();
+
+        // The new agent can.
+        vm.prank(newAgent);
+        vault.pause();
+        assertTrue(vault.paused(), "the new agent should be able to pause");
+    }
+
+    /// @dev Disabling the agent entirely (address(0)) also removes pause rights.
+    function test_setAgent_zeroRemovesPauseRights() public {
+        vm.prank(owner);
+        vault.setAgent(address(0));
+
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(AgentVault.NotOwnerOrAgent.selector, agent));
+        vault.pause();
+    }
+
     function test_setAgent_revertsForNonOwner() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
@@ -274,6 +321,55 @@ contract AgentVaultTest is Test {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vault.setCooldown(600);
+    }
+
+    /// @dev A leaked agent key must not be able to raise its own caps, swap in a
+    ///      new adapter, point the agent at itself, or change the cooldown.
+    function test_setters_revertForAgent() public {
+        AgentVault.TokenLimits memory limits =
+            AgentVault.TokenLimits({allowed: true, maxPerTrade: 1, maxPerDay: 1});
+
+        vm.startPrank(agent);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, agent));
+        vault.setTokenLimits(address(usdc), limits);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, agent));
+        vault.setAdapter(makeAddr("adapter"), true);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, agent));
+        vault.setAgent(agent);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, agent));
+        vault.setCooldown(600);
+
+        vm.stopPrank();
+    }
+
+    /// @dev SPEC: "Withdraw and all settings still work while paused." Lock that
+    ///      rule in now, before M1b adds `whenNotPaused` to the trading path.
+    function test_setters_workWhilePaused() public {
+        vm.prank(agent);
+        vault.pause();
+        assertTrue(vault.paused(), "precondition: vault is paused");
+
+        AgentVault.TokenLimits memory limits =
+            AgentVault.TokenLimits({allowed: true, maxPerTrade: 5_000e6, maxPerDay: 20_000e6});
+        address adapter = makeAddr("adapter");
+        address newAgent = makeAddr("newAgent");
+
+        vm.startPrank(owner);
+        vault.setTokenLimits(address(usdc), limits);
+        vault.setAdapter(adapter, true);
+        vault.setAgent(newAgent);
+        vault.setCooldown(600);
+        vm.stopPrank();
+
+        (bool allowed,,) = vault.tokenLimits(address(usdc));
+        assertTrue(allowed, "setTokenLimits should work while paused");
+        assertTrue(vault.allowedAdapters(adapter), "setAdapter should work while paused");
+        assertEq(vault.agent(), newAgent, "setAgent should work while paused");
+        assertEq(vault.cooldown(), 600, "setCooldown should work while paused");
     }
 
     // ------------------------------------------------------------------ //
@@ -383,5 +479,14 @@ contract AgentVaultTest is Test {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vault.transferOwnership(newOwner);
+    }
+
+    /// @dev Renouncing is disabled so the owner can never accidentally lock the
+    ///      vault (no owner would mean no withdraw and no unpause, ever).
+    function test_renounceOwnership_revertsForOwner() public {
+        vm.prank(owner);
+        vm.expectRevert(AgentVault.RenounceDisabled.selector);
+        vault.renounceOwnership();
+        assertEq(vault.owner(), owner, "owner should be unchanged");
     }
 }
