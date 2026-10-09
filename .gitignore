@@ -1,0 +1,22 @@
+# Dependencies and build output
+node_modules/
+out/
+cache/
+broadcast/
+dist/
+
+# Secrets: never commit these (.env.example is the only exception)
+.env*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+.venv/
+.pytest_cache/
+
+# Private strategy checked out by the tick workflow (see SPEC.md section 2c)
+_strategy/
